@@ -1,60 +1,131 @@
-"""Тест: может ли облачный сервер получить ролик Instagram через yt-dlp.
+"""Расшифровка и скачивание видео по ссылке Instagram. Сервер для Render (или локального запуска).
 
-Открой в браузере:
-  https://ВАШ-СЕРВИС.onrender.com/check?url=ССЫЛКА_НА_ПУБЛИЧНЫЙ_REEL
-  https://ВАШ-СЕРВИС.onrender.com/check?url=ССЫЛКА&dl=1   (то же + пробует скачать файл)
+Запуск на Render: uvicorn app:app --host 0.0.0.0 --port $PORT
+Локально:          python app.py
 
-Файлы никуда не сохраняются, после проверки ничего не остаётся.
+Переменные окружения (необязательно):
+  WHISPER_MODEL=tiny|base|small   (по умолчанию base: помещается в 512 MB)
+  COOKIES_BROWSER=chrome|safari|firefox|edge  (только локально, для приватных роликов)
 """
 
+import os
+import shutil
 import tempfile
+import threading
 from pathlib import Path
+from typing import Optional
 
-import yt_dlp
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
-app = FastAPI()
+BASE = Path(__file__).resolve().parent
+STATIC = BASE / "static"
+DOWNLOADS = Path(tempfile.gettempdir()) / "downloads"
+MODEL_NAME = os.environ.get("WHISPER_MODEL", "base")
+COOKIES_BROWSER = os.environ.get("COOKIES_BROWSER") or None
+
+app = FastAPI(title="Расшифровка видео")
+
+_model = None
+_lock = threading.Lock()  # одна расшифровка за раз: памяти мало
+
+
+def download_media(url, outdir, fmt):
+    """Скачивает медиа через yt-dlp. Возвращает (путь к файлу, info)."""
+    import yt_dlp
+
+    opts = {
+        "format": fmt,
+        "outtmpl": str(Path(outdir) / "%(id)s.%(ext)s"),
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+    }
+    if COOKIES_BROWSER:
+        opts["cookiesfrombrowser"] = (COOKIES_BROWSER,)
+
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        path = Path(ydl.prepare_filename(info))
+    return path, info
+
+
+def run_whisper(media, lang):
+    global _model
+    with _lock:
+        if _model is None:
+            from faster_whisper import WhisperModel
+
+            _model = WhisperModel(MODEL_NAME, device="cpu", compute_type="int8")
+        segments_iter, info = _model.transcribe(
+            str(media), language=lang, vad_filter=True, beam_size=1
+        )
+        segments = list(segments_iter)  # читаем файл внутри блокировки
+    return segments, info
+
+
+def save_upload(upload, dest_dir):
+    name = Path(upload.filename or "upload").name or "upload"
+    path = Path(dest_dir) / name
+    with open(path, "wb") as out:
+        shutil.copyfileobj(upload.file, out)
+    return path
 
 
 @app.get("/")
-def root():
-    return {"ok": True, "how": "/check?url=ссылка_на_публичный_reel  (добавьте &dl=1, чтобы попробовать скачать файл)"}
+def index():
+    return FileResponse(STATIC / "index.html")
 
 
-@app.get("/check")
-def check(url: str = Query(...), dl: int = Query(0)):
-    result = {"url": url}
+@app.get("/health")
+def health():
+    return {"ok": True, "model": MODEL_NAME}
 
-    # 1. Только метаданные: видит ли сервер ролик вообще
-    try:
-        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "noplaylist": True}) as ydl:
-            info = ydl.extract_info(url, download=False)
-        result["metadata"] = "ok"
-        result["title"] = info.get("title")
-        result["duration_sec"] = info.get("duration")
-    except Exception as e:
-        result["metadata"] = "error"
-        result["error"] = str(e)[:500]
-        return result
 
-    # 2. Скачивание файла (по желанию)
-    if dl:
+@app.post("/api/transcribe")
+def transcribe_endpoint(
+    url: str = Form(""),
+    lang: str = Form(""),
+    file: Optional[UploadFile] = File(None),
+):
+    with tempfile.TemporaryDirectory() as tmp:
         try:
-            tmp = Path(tempfile.mkdtemp())
-            opts = {
-                "format": "best[ext=mp4]/best",
-                "outtmpl": str(tmp / "%(id)s.%(ext)s"),
-                "quiet": True,
-                "no_warnings": True,
-                "noplaylist": True,
-            }
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                path = Path(ydl.prepare_filename(info))
-            result["download"] = "ok"
-            result["size_mb"] = round(path.stat().st_size / 1e6, 2)
+            if file is not None and file.filename:
+                media = save_upload(file, tmp)
+            elif url.strip():
+                media, _ = download_media(url.strip(), tmp, "bestaudio/best")
+            else:
+                raise HTTPException(400, "Вставьте ссылку или выберите файл.")
+            segments, info = run_whisper(media, lang.strip() or None)
+        except HTTPException:
+            raise
         except Exception as e:
-            result["download"] = "error"
-            result["error"] = str(e)[:500]
+            raise HTTPException(400, f"Не получилось расшифровать: {e}")
 
-    return result
+    return {
+        "language": info.language,
+        "segments": [
+            {"start": s.start, "text": s.text.strip()}
+            for s in segments
+            if s.text.strip()
+        ],
+    }
+
+
+@app.post("/api/download")
+def download_endpoint(url: str = Form(...)):
+    url = url.strip()
+    if not url:
+        raise HTTPException(400, "Вставьте ссылку.")
+    DOWNLOADS.mkdir(parents=True, exist_ok=True)
+    try:
+        path, _ = download_media(url, DOWNLOADS, "best[ext=mp4]/best")
+    except Exception as e:
+        raise HTTPException(400, f"Не получилось скачать: {e}")
+    return FileResponse(path, filename=path.name, media_type="video/mp4")
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))

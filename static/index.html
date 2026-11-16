@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Расшифровка видео</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #f7f7f5;
+    --ink: #171717;
+    --muted: #77776f;
+    --line: #dcdcd6;
+    --accent: #2f4f4f;
+    --error: #9b2c2c;
+    --sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --serif: "Newsreader", Georgia, "Times New Roman", serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 12vh 24px 96px;
+  }
+
+  h1 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 2.25rem;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    margin: 0 0 8px;
+  }
+
+  .lede {
+    color: var(--muted);
+    margin: 0 0 40px;
+    line-height: 1.5;
+  }
+
+  .hidden { display: none !important; }
+
+  button { font: inherit; cursor: pointer; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  button:focus-visible, input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  input[type="url"] {
+    width: 100%;
+    font: inherit;
+    font-size: 1rem;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: #fff;
+    color: var(--ink);
+  }
+  input[type="url"]::placeholder { color: var(--muted); }
+
+  .row {
+    margin-top: 12px;
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .btn {
+    background: var(--ink);
+    color: var(--paper);
+    border: 1px solid var(--ink);
+    border-radius: 4px;
+    padding: 11px 20px;
+    font-size: 0.95rem;
+  }
+  .btn.ghost {
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--line);
+  }
+
+  .or {
+    margin-top: 28px;
+    color: var(--muted);
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .or span.name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 320px;
+    color: var(--ink);
+  }
+
+  .opts {
+    margin-top: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .seg {
+    display: inline-flex;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .seg button {
+    background: transparent;
+    border: 0;
+    padding: 8px 14px;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  .seg button[aria-pressed="true"] {
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  .status {
+    margin-top: 28px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+  .status.error { color: var(--error); }
+
+  progress {
+    display: block;
+    width: 100%;
+    height: 3px;
+    margin-top: 12px;
+    accent-color: var(--accent);
+  }
+
+  .result { margin-top: 44px; }
+
+  .text {
+    font-family: var(--serif);
+    font-size: 1.1rem;
+    line-height: 1.7;
+    max-width: 60ch;
+  }
+  .text p { margin: 0 0 1em; }
+  .ts {
+    display: inline-block;
+    min-width: 4.2em;
+    margin-right: 0.6em;
+    color: var(--muted);
+    font-family: var(--sans);
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+    user-select: none;
+  }
+
+  .actions {
+    margin-top: 28px;
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  footer {
+    margin-top: 72px;
+    color: var(--muted);
+    font-size: 0.85rem;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Расшифровка видео</h1>
+  <p class="lede">Вставьте ссылку на ролик из Instagram или выберите видео с компьютера.</p>
+
+  <form id="form" autocomplete="off">
+    <input type="url" id="url" placeholder="https://www.instagram.com/reel/…" aria-label="Ссылка на видео">
+    <div class="row">
+      <button class="btn" id="transcribe" type="submit">Расшифровать</button>
+      <button class="btn ghost" id="download" type="button">Скачать видео</button>
+    </div>
+
+    <div class="or">
+      <button class="btn ghost" id="pick" type="button">Выбрать файл</button>
+      <span class="name hidden" id="fileName"></span>
+      <button class="btn ghost hidden" id="clearFile" type="button">Убрать</button>
+      <input type="file" id="file" accept="video/*,audio/*" hidden>
+    </div>
+
+    <div class="opts">
+      <div class="seg" role="group" aria-label="Формат текста">
+        <button type="button" id="modeTs" aria-pressed="true">С таймкодами</button>
+        <button type="button" id="modePlain" aria-pressed="false">Без таймкодов</button>
+      </div>
+    </div>
+  </form>
+
+  <div class="status hidden" id="status" role="status"></div>
+  <progress class="hidden" id="bar" max="100"></progress>
+
+  <section class="result hidden" id="result">
+    <div class="text" id="text"></div>
+    <div class="actions">
+      <button class="btn ghost" id="copy" type="button">Копировать</button>
+      <button class="btn ghost" id="saveTxt" type="button">Скачать .txt</button>
+    </div>
+  </section>
+
+  <footer>
+    Распознавание и скачивание идут на вашем компьютере. Первый запуск загружает модель распознавания, это может занять несколько минут. Для приватных роликов приложение может использовать вход в Instagram из браузера, если его настроить.
+  </footer>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  let file = null;
+  let segments = [];
+  let mode = "ts";
+  let busy = false;
+
+  function fmtTime(sec) {
+    const s = Math.floor(sec);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const r = s % 60;
+    const p = (n) => String(n).padStart(2, "0");
+    return h ? `${h}:${p(m)}:${p(r)}` : `${p(m)}:${p(r)}`;
+  }
+
+  function setStatus(msg, isError = false) {
+    const el = $("status");
+    el.textContent = msg;
+    el.classList.toggle("error", isError);
+    el.classList.toggle("hidden", !msg);
+  }
+
+  function setBusy(on, msg = "") {
+    busy = on;
+    $("transcribe").disabled = on;
+    $("download").disabled = on;
+    const bar = $("bar");
+    bar.classList.toggle("hidden", !on);
+    if (on) {
+      bar.removeAttribute("value"); // неопределённый прогресс
+      setStatus(msg);
+    } else {
+      setStatus("");
+    }
+  }
+
+  function outputText(m) {
+    if (m === "plain") return segments.map((s) => s.text).join(" ");
+    return segments.map((s) => `[${fmtTime(s.start)}] ${s.text}`).join("\n");
+  }
+
+  function render() {
+    const box = $("text");
+    box.replaceChildren();
+    if (mode === "plain") {
+      const p = document.createElement("p");
+      p.textContent = outputText("plain");
+      box.append(p);
+    } else {
+      for (const s of segments) {
+        const p = document.createElement("p");
+        const ts = document.createElement("span");
+        ts.className = "ts";
+        ts.textContent = fmtTime(s.start);
+        p.append(ts, s.text);
+        box.append(p);
+      }
+    }
+  }
+
+  function setMode(m) {
+    mode = m;
+    $("modeTs").setAttribute("aria-pressed", String(m === "ts"));
+    $("modePlain").setAttribute("aria-pressed", String(m === "plain"));
+    if (segments.length) render();
+  }
+
+  async function postError(res) {
+    try {
+      const data = await res.json();
+      return data.detail || `Ошибка ${res.status}`;
+    } catch {
+      return `Ошибка ${res.status}`;
+    }
+  }
+
+  async function transcribe(e) {
+    e.preventDefault();
+    if (busy) return;
+    const url = $("url").value.trim();
+    if (!file && !url) {
+      setStatus("Вставьте ссылку или выберите файл.", true);
+      return;
+    }
+
+    const fd = new FormData();
+    if (file) fd.append("file", file);
+    else fd.append("url", url);
+
+    $("result").classList.add("hidden");
+    setBusy(true, "Скачиваю и расшифровываю. Для длинного ролика это может занять несколько минут…");
+    try {
+      const res = await fetch("/api/transcribe", { method: "POST", body: fd });
+      if (!res.ok) throw new Error(await postError(res));
+      const data = await res.json();
+      segments = data.segments;
+      if (!segments.length) throw new Error("В видео не найдено речи.");
+      render();
+      $("result").classList.remove("hidden");
+      setBusy(false);
+    } catch (err) {
+      setBusy(false);
+      setStatus(err.message || "Не получилось расшифровать.", true);
+    }
+  }
+
+  async function downloadVideo() {
+    if (busy) return;
+    const url = $("url").value.trim();
+    if (!url) {
+      setStatus("Вставьте ссылку на ролик.", true);
+      return;
+    }
+    const fd = new FormData();
+    fd.append("url", url);
+    setBusy(true, "Скачиваю видео…");
+    try {
+      const res = await fetch("/api/download", { method: "POST", body: fd });
+      if (!res.ok) throw new Error(await postError(res));
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "video.mp4";
+      a.click();
+      URL.revokeObjectURL(a.href);
+      setBusy(false);
+      setStatus("Видео сохранено в загрузки.");
+    } catch (err) {
+      setBusy(false);
+      setStatus(err.message || "Не получилось скачать.", true);
+    }
+  }
+
+  $("form").addEventListener("submit", transcribe);
+  $("download").addEventListener("click", downloadVideo);
+
+  $("pick").addEventListener("click", () => $("file").click());
+  $("file").addEventListener("change", (e) => {
+    file = e.target.files[0] || null;
+    $("fileName").textContent = file ? file.name : "";
+    $("fileName").classList.toggle("hidden", !file);
+    $("clearFile").classList.toggle("hidden", !file);
+  });
+  $("clearFile").addEventListener("click", () => {
+    file = null;
+    $("file").value = "";
+    $("fileName").classList.add("hidden");
+    $("clearFile").classList.add("hidden");
+  });
+
+  $("modeTs").addEventListener("click", () => setMode("ts"));
+  $("modePlain").addEventListener("click", () => setMode("plain"));
+
+  $("copy").addEventListener("click", async () => {
+    await navigator.clipboard.writeText(outputText(mode));
+    setStatus("Текст скопирован.");
+    setTimeout(() => setStatus(""), 1500);
+  });
+
+  $("saveTxt").addEventListener("click", () => {
+    const base = file ? file.name.replace(/\.[^.]+$/, "") : "transcript";
+    const blob = new Blob([outputText(mode)], { type: "text/plain;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${base}.txt`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+</script>
+</body>
+</html>
