@@ -3,4 +3,4 @@ uvicorn
 python-multipart
 yt-dlp
 faster-whisper
-av
+av>=15,<19
